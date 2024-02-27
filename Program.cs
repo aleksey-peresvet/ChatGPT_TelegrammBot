@@ -14,13 +14,23 @@ namespace TelegramBot_Chat_GPT
         private static OpenAI_ChatGPT? chatGPT = default;
         private static bool NeedSetNewApiKey = false;
         private static bool NeedSetNewApiUrl = false;
+        private static List<string> ALLOWED_USERS { get; set; }
 
         private static void StartBot()
         {
             var settings = new Settings();
             var botToken = settings?.BOT_TOKEN;
+
             if (string.IsNullOrEmpty(botToken))
                 return;
+
+            ALLOWED_USERS = settings?.ALLOWED_USERS;
+
+            if (ALLOWED_USERS == null || ALLOWED_USERS.Count == 0)
+            {
+                Console.WriteLine("Не удалось получить список пользователей с правом доступа к боту.");
+                return;
+            }    
 
             var bot = new TelegramBotClient(botToken);
             var cancellationToken = new CancellationTokenSource().Token;
@@ -53,6 +63,21 @@ namespace TelegramBot_Chat_GPT
                 var message = update.Message;
                 var messageText = message.Text;
                 var messageChat = message.Chat;
+                var userName = messageChat.Username;
+
+                // Логирование всех входящих сообщений.
+                Console.WriteLine($"[{DateTime.Now}] {userName} : {messageText}");
+
+                // Проверка пользователя.
+                if (!ALLOWED_USERS.Contains(userName))
+                {
+                    Console.WriteLine($"Зафиксирован пользователь без права доступа - {userName}");
+                    var answer = $"User named {userName} is not included in the list of users with allowed access.";
+                    await botClient.SendTextMessageAsync(messageChat, answer);
+
+                    return;
+                }
+
                 var firstWord = string.IsNullOrEmpty(messageText) ? string.Empty :
                     messageText.Substring(0, messageText.IndexOf(' ') < 0 ? 0 : messageText.IndexOf(' '));
 
