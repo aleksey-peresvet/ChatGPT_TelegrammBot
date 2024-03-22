@@ -36,37 +36,41 @@ namespace TelegramBot_Chat_GPT
 
         public async Task<string?> ChatWithOpenAI(string question)
         {
-            if (API == null)
+            if (API == null || string.IsNullOrWhiteSpace(question))
                 return null;
 
             var response = string.Empty;
+            var errorResponseCount = 0;
 
-            try
+            while (string.IsNullOrWhiteSpace(response) && errorResponseCount < 10)
             {
-                var chatMessage = new ChatMessage();
-
-                chatMessage.Role = ChatMessageRole.User;
-                chatMessage.TextContent = question;
-
-                var request = new ChatRequest()
+                try
                 {
-                    Model = Model.GPT4_Turbo,
-                    Temperature = OPENAI_CHAT_TEMPERATURE,
-                    Messages = new ChatMessage[] { chatMessage }
-                };
-
-                await foreach (var token in API.Chat.StreamChatEnumerableAsync(request))
-                {
-                    if (token?.Choices.Count > 0)
+                    var chatMessage = new ChatMessage()
                     {
-                        foreach (var choice in token.Choices)
+                        Role = ChatMessageRole.User,
+                        TextContent = question
+                    };
+
+                    var request = new ChatRequest()
+                    {
+                        ResponseFormat = ChatRequest.ResponseFormats.JsonObject,
+                        Model = Model.ChatGPTTurbo,
+                        Temperature = OPENAI_CHAT_TEMPERATURE,
+                        Messages = new ChatMessage[] { chatMessage }
+                    };
+
+                    await foreach (var chatResult in API.Chat.StreamChatEnumerableAsync(request).ConfigureAwait(false))
+                    {
+                        foreach (var choice in chatResult.Choices)
                             response += choice.Delta.TextContent;
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.ToString());
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"\n{ex.Message}\n");
+                    errorResponseCount++;
+                }
             }
 
             return string.IsNullOrEmpty(response) ? "В данный момент сервис OpenAI не может обработать ваш запрос." : response;
@@ -90,7 +94,7 @@ namespace TelegramBot_Chat_GPT
                     Size = OpenAI_API.Images.ImageSize._1024,
                 });
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 Console.WriteLine(ex.ToString());
             }
