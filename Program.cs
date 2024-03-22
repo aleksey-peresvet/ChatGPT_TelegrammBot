@@ -14,6 +14,8 @@ namespace TelegramBot_Chat_GPT
         private static OpenAI_ChatGPT? chatGPT = default;
         private static bool NeedSetNewApiKey = false;
         private static bool NeedSetNewApiUrl = false;
+        private static bool NeedCheckAdminPassword = false;
+        private static bool IsAdmin = false;
         private static List<string> ALLOWED_USERS { get; set; }
 
         private static void StartBot()
@@ -30,7 +32,7 @@ namespace TelegramBot_Chat_GPT
             {
                 Console.WriteLine("Не удалось получить список пользователей с правом доступа к боту.");
                 return;
-            }    
+            }
 
             var bot = new TelegramBotClient(botToken);
             var cancellationToken = new CancellationTokenSource().Token;
@@ -55,7 +57,7 @@ namespace TelegramBot_Chat_GPT
 
         public static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
-            if (update?.Message == null)
+            if (update?.Message == null && update?.CallbackQuery == null)
                 return;
 
             if (update.Type == UpdateType.Message)
@@ -65,13 +67,17 @@ namespace TelegramBot_Chat_GPT
                 var messageChat = message.Chat;
                 var userName = messageChat.Username;
 
-                // Логирование всех входящих сообщений.
-                Console.WriteLine($"[{DateTime.Now}] {userName} : {messageText}");
+                // Логирование всех входящих сообщений, кроме пароля администратора.
+                if (!NeedCheckAdminPassword)
+                    Console.WriteLine($"[{DateTime.Now}] {userName} : {messageText}");
 
                 // Проверка пользователя.
                 if (!ALLOWED_USERS.Contains(userName))
                 {
-                    Console.WriteLine($"Зафиксирован пользователь без права доступа - {userName}");
+                    Console.Write("Зафиксирован пользователь без права доступа - ");
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Write($"{userName}\n");
+                    Console.ResetColor();
                     var answer = $"User named {userName} is not included in the list of users with allowed access.";
                     await botClient.SendTextMessageAsync(messageChat, answer);
 
@@ -83,29 +89,96 @@ namespace TelegramBot_Chat_GPT
 
                 if (messageText == "/help")
                 {
-                    var answer = "Бот поддерживает два режима: рисование и чат.\n" +
+                    var userPartForHelp =
+                        "Бот поддерживает два режима: рисование и чат.\n" +
                         "Для вызова режима рисования ваш запрос должен начинаться со слова Нарисуй.\n" +
-                        "Для режима Чат доступна настройка креативности ответа ИИ: /creativity_level\n" +
+                        "Для режима Чат доступна настройка креативности ответа ИИ: /creativity_level\n";
+                    var adminPartForHelp =
                         "Для установки нового KEY для доступа к API: /set_new_api_key\n" +
                         "Для установки нового URL для доступа к API: /set_new_api_url\n" +
-                        "Для перезапуска бота: /restart";
+                        "Для очистки консоли бота: /clear_console\n" +
+                        "Для перезапуска бота: /restart\n" +
+                        "Для понижения уровня доступа: /user";
+                    var answer = IsAdmin ? userPartForHelp + adminPartForHelp : userPartForHelp;
 
                     await botClient.SendTextMessageAsync(messageChat, answer);
                 }
+                else if (messageText == "/clear_console")
+                {
+                    if (IsAdmin)
+                    {
+                        Console.Clear();
+                        await botClient.SendTextMessageAsync(messageChat, "Консоль бота была очищена!");
+                    }
+                    else
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
+                        return;
+                    }
+                }
+                else if (messageText == "/admin")
+                {
+                    if (IsAdmin)
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Уровень доступа 'Администратор' уже активирован.");
+                    }
+                    else
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Введите пароль администратора: ");
+                        NeedCheckAdminPassword = true;
+                    }
+                }
+                else if (messageText == "/user")
+                {
+                    if (IsAdmin)
+                    {
+                        IsAdmin = false;
+                        await botClient.SendTextMessageAsync(messageChat, "Активирован уровень доступа 'Пользователь'.");
+                    }
+                    else
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Уровень доступа 'Пользователь' уже активирован.");
+                    }
+                }
                 else if (messageText == "/restart")
                 {
-                    botClient.CloseAsync();
-                    StartBot();
+                    if (IsAdmin)
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Иницирован перезапуск телеграмм бота!");
+                        botClient.CloseAsync();
+                        StartBot();
+                    }
+                    else
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
+                        return;
+                    }
                 }
                 else if (messageText == "/set_new_api_key")
                 {
-                    await botClient.SendTextMessageAsync(messageChat, "Введите новый API KEY: ");
-                    NeedSetNewApiKey = true;
+                    if (IsAdmin)
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Введите новый API KEY: ");
+                        NeedSetNewApiKey = true;
+                    }
+                    else
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
+                        return;
+                    }
                 }
                 else if (messageText == "/set_new_api_url")
                 {
-                    await botClient.SendTextMessageAsync(messageChat, "Введите новый API URL: ");
-                    NeedSetNewApiUrl = true;
+                    if (IsAdmin)
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Введите новый API URL: ");
+                        NeedSetNewApiUrl = true;
+                    }
+                    else
+                    {
+                        await botClient.SendTextMessageAsync(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
+                        return;
+                    }
                 }
                 else if (messageText == "/creativity_level")
                 {
@@ -139,6 +212,22 @@ namespace TelegramBot_Chat_GPT
                 }
                 else
                 {
+                    if (NeedCheckAdminPassword)
+                    {
+                        NeedCheckAdminPassword = false;
+                        var settings = new Settings();
+                        IsAdmin = settings.CheckAdminPassword(messageText);
+
+                        if (IsAdmin)
+                            await botClient.SendTextMessageAsync(messageChat, "Активирован уровень доступа 'Администратор'.");
+                        else
+                            await botClient.SendTextMessageAsync(messageChat, "Введен неверный пароль администратора!");
+
+                        botClient.DeleteMessageAsync(messageChat.Id, message.MessageId);
+
+                        return;
+                    }
+
                     if (NeedSetNewApiKey)
                     {
                         NeedSetNewApiKey = false;

@@ -14,6 +14,7 @@ namespace myChatGptTelegramBot
         public string OPENAI_API_URL { get; private set; }
         public string BOT_TOKEN { get; private set; }
         public List<string> ALLOWED_USERS { get; private set; }
+        private string ADMIN_PASSWORD { get; set; }
 
         private const string SETTINGS_FILE_NAME = "settings.json";
 
@@ -45,6 +46,12 @@ namespace myChatGptTelegramBot
             OPENAI_API_URL = string.IsNullOrEmpty(currentApiUrl) ? OPENAI_API_URL : currentApiUrl;
             BOT_TOKEN = string.IsNullOrEmpty(botToken) ? BOT_TOKEN : botToken;
             ALLOWED_USERS = allowedUsers ?? ALLOWED_USERS;
+            ADMIN_PASSWORD = settings?.AdminPassword ?? ADMIN_PASSWORD;
+        }
+
+        public bool CheckAdminPassword(string password)
+        {
+            return !string.IsNullOrWhiteSpace(password) && password == ADMIN_PASSWORD;
         }
 
         private _Settings? TryGetSettings()
@@ -110,7 +117,8 @@ namespace myChatGptTelegramBot
                 ApiKey = needUpdateApiKey ? newApiKey : currentApiKey,
                 ApiUrl = needUpdateApiUrl ? newApiUrl : currentApiUrl,
                 BotToken = currentSettings?.BotToken,
-                AllowedUsers = currentSettings.AllowedUsers
+                AllowedUsers = currentSettings.AllowedUsers,
+                AdminPassword = currentSettings?.AdminPassword
             };
 
             var settingsFile = default(FileStream);
@@ -147,5 +155,6 @@ namespace myChatGptTelegramBot
         public string? ApiUrl { get; set; }
         public string? BotToken { get; set;}
         public List<string> AllowedUsers { get; set; }
+        public string? AdminPassword { get; set; }
     }
 }
