@@ -259,7 +259,7 @@ namespace TelegramBot_Chat_GPT
                         }
 
                         NeedSetNewModel = false;
-                        ChatGPT.MODEL_NAME = messageText;
+                        ChatGPT.InitNewModel(messageText);
 
                         return;
                     }
@@ -297,7 +297,7 @@ namespace TelegramBot_Chat_GPT
                     }
 
                     var answer = await ChatGPT.ChatWithOpenAI(messageText);
-                    var answerParts = answer?.Split(". ");
+                    var answerParts = answer?.Split(new string[] { ".\n", ". " }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                     foreach (var part in answerParts)
                         await botClient.SendMessage(messageChat, $"{part}.");
                 }
