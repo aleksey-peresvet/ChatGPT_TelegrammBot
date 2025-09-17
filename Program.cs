@@ -4,58 +4,74 @@ using Telegram.Bot.Polling;
 using Newtonsoft.Json;
 using Telegram.Bot.Types.ReplyMarkups;
 using Telegram.Bot.Types.Enums;
-using OpenAI_API;
 using myChatGptTelegramBot;
 
 namespace TelegramBot_Chat_GPT
 {
     class Program
     {
-        private static OpenAI_ChatGPT? chatGPT = default;
+        private static OpenAI_ChatGPT? ChatGPT = default;
+        private static bool NeedSetNewModel = false;
         private static bool NeedSetNewApiKey = false;
         private static bool NeedSetNewApiUrl = false;
         private static bool NeedCheckAdminPassword = false;
         private static bool IsAdmin = false;
-        private static List<string> ALLOWED_USERS { get; set; }
+        private static List<string>? ALLOWED_USERS { get; set; }
 
         private static void StartBot()
         {
-            var settings = new Settings();
-            var botToken = settings?.BOT_TOKEN;
+            #region Полчение данных из файла настроек.
 
-            if (string.IsNullOrEmpty(botToken))
+            var settings = new Settings();
+            if (settings == null)
+            {
+                Console.WriteLine("Не удалось получить объект с данными файла настроек.");
                 return;
+            }
+
+            var botToken = settings.BOT_TOKEN;
+            if (string.IsNullOrEmpty(botToken))
+            {
+                Console.WriteLine("Не удалось получить токен для подключения к боту.");
+                return;
+            }
 
             ALLOWED_USERS = settings?.ALLOWED_USERS;
-
             if (ALLOWED_USERS == null || ALLOWED_USERS.Count == 0)
             {
                 Console.WriteLine("Не удалось получить список пользователей с правом доступа к боту.");
                 return;
             }
 
+            #endregion
+
+            #region Запуск бота.
+
             var bot = new TelegramBotClient(botToken);
             var cancellationToken = new CancellationTokenSource().Token;
 
-            if (bot.TestApiAsync(cancellationToken).Result)
+            if (bot.TestApi(cancellationToken).Result)
             {
                 var receiverOptions = new ReceiverOptions { AllowedUpdates = { } };
 
-                bot.DeleteWebhookAsync(true);
+                bot.DeleteWebhook(true);
                 bot.StartReceiving(HandleUpdateAsync, HandleErrorAsync, receiverOptions, cancellationToken);
-                chatGPT = new OpenAI_ChatGPT(settings);
+                ChatGPT = new OpenAI_ChatGPT(settings);
 
-                Console.WriteLine($"Запуск бота {bot.GetMeAsync().Result.FirstName} завершен успешно.");
+                Console.WriteLine($"Запуск бота {bot.GetMe().Result.FirstName} завершен успешно.");
                 Console.ReadLine();
+
             }
             else
             {
                 Console.WriteLine("Не удалось запустить бот, проверьте корректность токена бота.");
                 Console.ReadLine();
             }
+
+            #endregion
         }
 
-        public static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
+        private static async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
             if (update?.Message == null && update?.CallbackQuery == null)
                 return;
@@ -63,23 +79,23 @@ namespace TelegramBot_Chat_GPT
             if (update.Type == UpdateType.Message)
             {
                 var message = update.Message;
-                var messageText = message.Text;
-                var messageChat = message.Chat;
-                var userName = messageChat.Username;
+                var messageText = message?.Text;
+                var messageChat = message?.Chat;
+                var userName = messageChat?.Username;
 
                 // Логирование всех входящих сообщений, кроме пароля администратора.
                 if (!NeedCheckAdminPassword)
                     Console.WriteLine($"[{DateTime.Now}] {userName} : {messageText}");
 
                 // Проверка пользователя.
-                if (!ALLOWED_USERS.Contains(userName))
+                if (ALLOWED_USERS == null || ALLOWED_USERS.Count == 0 || !ALLOWED_USERS.Contains(userName))
                 {
                     Console.Write("Зафиксирован пользователь без права доступа - ");
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.Write($"{userName}\n");
                     Console.ResetColor();
                     var answer = $"User named {userName} is not included in the list of users with allowed access.";
-                    await botClient.SendTextMessageAsync(messageChat, answer);
+                    await botClient.SendMessage(messageChat, answer);
 
                     return;
                 }
@@ -90,9 +106,11 @@ namespace TelegramBot_Chat_GPT
                 if (messageText == "/help")
                 {
                     var userPartForHelp =
-                        "Бот поддерживает два режима: рисование и чат.\n" +
-                        "Для вызова режима рисования ваш запрос должен начинаться со слова Нарисуй.\n" +
-                        "Для режима Чат доступна настройка креативности ответа ИИ: /creativity_level\n";
+                        "Бот создан для использования языковой модели ChatGPT.\n" +
+                        "Для получения имени текущей языковой модели: /get_current_model\n" +
+                        "Для установки новой языковой модели: /set_new_model\n";
+                    //"Для вызова режима рисования ваш запрос должен начинаться со слова Нарисуй.\n" +
+                    //"Для режима Чат доступна настройка креативности ответа ИИ: /creativity_level\n";
                     var adminPartForHelp =
                         "Для установки нового KEY для доступа к API: /set_new_api_key\n" +
                         "Для установки нового URL для доступа к API: /set_new_api_url\n" +
@@ -101,84 +119,104 @@ namespace TelegramBot_Chat_GPT
                         "Для понижения уровня доступа: /user";
                     var answer = IsAdmin ? userPartForHelp + adminPartForHelp : userPartForHelp;
 
-                    await botClient.SendTextMessageAsync(messageChat, answer);
+                    await botClient.SendMessage(messageChat, answer);
+                }
+                else if (messageText == "/get_current_model")
+                {
+                    await botClient.SendMessage(messageChat, $"В данный момент используется языковая модель - {ChatGPT?.MODEL_NAME}");
+                    return;
+                }
+                else if (messageText == "/set_new_model")
+                {
+                    await botClient.SendMessage(messageChat, "Укажите название новой языковой модели.");
+                    NeedSetNewModel = true;
+
+                    return;
                 }
                 else if (messageText == "/clear_console")
                 {
                     if (IsAdmin)
                     {
                         Console.Clear();
-                        await botClient.SendTextMessageAsync(messageChat, "Консоль бота была очищена!");
+                        await botClient.SendMessage(messageChat, "Консоль бота была очищена!");
                     }
                     else
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
-                        return;
+                        await botClient.SendMessage(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
                     }
+
+                    return;
                 }
                 else if (messageText == "/admin")
                 {
                     if (IsAdmin)
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Уровень доступа 'Администратор' уже активирован.");
+                        await botClient.SendMessage(messageChat, "Уровень доступа 'Администратор' уже активирован.");
                     }
                     else
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Введите пароль администратора: ");
+                        await botClient.SendMessage(messageChat, "Введите пароль администратора: ");
                         NeedCheckAdminPassword = true;
                     }
+
+                    return;
                 }
                 else if (messageText == "/user")
                 {
                     if (IsAdmin)
                     {
                         IsAdmin = false;
-                        await botClient.SendTextMessageAsync(messageChat, "Активирован уровень доступа 'Пользователь'.");
+                        await botClient.SendMessage(messageChat, "Активирован уровень доступа 'Пользователь'.");
                     }
                     else
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Уровень доступа 'Пользователь' уже активирован.");
+                        await botClient.SendMessage(messageChat, "Уровень доступа 'Пользователь' уже активирован.");
                     }
+
+                    return;
                 }
                 else if (messageText == "/restart")
                 {
                     if (IsAdmin)
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Иницирован перезапуск телеграмм бота!");
-                        botClient.CloseAsync();
+                        await botClient.SendMessage(messageChat, "Иницирован перезапуск телеграмм бота!");
+                        botClient.Close();
                         StartBot();
                     }
                     else
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
-                        return;
+                        await botClient.SendMessage(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
                     }
+
+                    return;
                 }
                 else if (messageText == "/set_new_api_key")
                 {
                     if (IsAdmin)
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Введите новый API KEY: ");
+                        await botClient.SendMessage(messageChat, "Введите новый API KEY: ");
                         NeedSetNewApiKey = true;
                     }
                     else
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
-                        return;
+                        await botClient.SendMessage(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
                     }
+
+                    return;
                 }
                 else if (messageText == "/set_new_api_url")
                 {
                     if (IsAdmin)
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Введите новый API URL: ");
+                        await botClient.SendMessage(messageChat, "Введите новый API URL: ");
                         NeedSetNewApiUrl = true;
                     }
                     else
                     {
-                        await botClient.SendTextMessageAsync(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
-                        return;
+                        await botClient.SendMessage(messageChat, "Недостаточный уровень доступа для выполнение данной операции!");
                     }
+
+                    return;
                 }
                 else if (messageText == "/creativity_level")
                 {
@@ -203,15 +241,29 @@ namespace TelegramBot_Chat_GPT
                         }
                     });
 
-                    await botClient.SendTextMessageAsync(messageChat, "Выберите уровень креативности ИИ:", replyMarkup: keyboard);
+                    await botClient.SendMessage(messageChat, "Выберите уровень креативности ИИ:", replyMarkup: keyboard);
                 }
                 else if (firstWord.ToLower() == "нарисуй")
                 {
-                    var answer = await chatGPT.PaintWithOpenAI(messageText.Substring(firstWord.Length));
-                    await botClient.SendTextMessageAsync(messageChat, answer);
+                    var answer = await ChatGPT.PaintWithOpenAI(messageText.Substring(firstWord.Length));
+                    await botClient.SendMessage(messageChat, answer);
                 }
                 else
                 {
+                    if (NeedSetNewModel)
+                    {
+                        if (string.IsNullOrWhiteSpace(messageText))
+                        {
+                            await botClient.SendMessage(messageChat, "Введено некорректное имя модели! Введите корректное имя новой языковой модели.");
+                            return;
+                        }
+
+                        NeedSetNewModel = false;
+                        ChatGPT.MODEL_NAME = messageText;
+
+                        return;
+                    }
+
                     if (NeedCheckAdminPassword)
                     {
                         NeedCheckAdminPassword = false;
@@ -219,11 +271,11 @@ namespace TelegramBot_Chat_GPT
                         IsAdmin = settings.CheckAdminPassword(messageText);
 
                         if (IsAdmin)
-                            await botClient.SendTextMessageAsync(messageChat, "Активирован уровень доступа 'Администратор'.");
+                            await botClient.SendMessage(messageChat, "Активирован уровень доступа 'Администратор'.");
                         else
-                            await botClient.SendTextMessageAsync(messageChat, "Введен неверный пароль администратора!");
+                            await botClient.SendMessage(messageChat, "Введен неверный пароль администратора!");
 
-                        botClient.DeleteMessageAsync(messageChat.Id, message.MessageId);
+                        botClient.DeleteMessage(messageChat.Id, message.MessageId);
 
                         return;
                     }
@@ -244,8 +296,10 @@ namespace TelegramBot_Chat_GPT
                         return;
                     }
 
-                    var answer = await chatGPT.ChatWithOpenAI(messageText);
-                    await botClient.SendTextMessageAsync(messageChat, answer);
+                    var answer = await ChatGPT.ChatWithOpenAI(messageText);
+                    var answerParts = answer?.Split(". ");
+                    foreach (var part in answerParts)
+                        await botClient.SendMessage(messageChat, $"{part}.");
                 }
             }
             else if (update.Type == UpdateType.CallbackQuery)
@@ -254,17 +308,17 @@ namespace TelegramBot_Chat_GPT
                 var callbackData = update.CallbackQuery?.Data;
                 var success = double.TryParse(callbackData, out openai_chat_temperature);
 
-                chatGPT.OPENAI_CHAT_TEMPERATURE = success ? openai_chat_temperature : 1;
-                _ = await botClient.SendTextMessageAsync(update.CallbackQuery?.Message?.Chat, "Выбран уровень креативности = " + (int)(openai_chat_temperature * 10));
+                ChatGPT.OPENAI_CHAT_TEMPERATURE = success ? openai_chat_temperature : 1;
+                _ = await botClient.SendMessage(update.CallbackQuery?.Message?.Chat, "Выбран уровень креативности = " + (int)(openai_chat_temperature * 10));
             }
         }
 
-        public static async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
+        private static async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
         {
             Console.WriteLine(JsonConvert.SerializeObject(exception));
         }
 
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
             StartBot();
         }

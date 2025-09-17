@@ -1,20 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.WebSockets;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Text;
 using Newtonsoft.Json;
 
 namespace myChatGptTelegramBot
 {
     internal class Settings
     {
-        public string OPENAI_API_KEY { get; private set; }
-        public string OPENAI_API_URL { get; private set; }
-        public string BOT_TOKEN { get; private set; }
-        public List<string> ALLOWED_USERS { get; private set; }
-        private string ADMIN_PASSWORD { get; set; }
+        public string? OPENAI_API_KEY { get; private set; }
+        public string? OPENAI_API_URL { get; private set; }
+        public string? BOT_TOKEN { get; private set; }
+        public List<string>? ALLOWED_USERS { get; private set; }
+        private string? ADMIN_PASSWORD { get; set; }
 
         private const string SETTINGS_FILE_NAME = "settings.json";
 
@@ -41,12 +36,13 @@ namespace myChatGptTelegramBot
             var currentApiUrl = settings?.ApiUrl;
             var botToken = settings?.BotToken;
             var allowedUsers = settings?.AllowedUsers;
+            var adminPassword = settings?.AdminPassword;
 
             OPENAI_API_KEY = string.IsNullOrEmpty(currentApiKey) ? OPENAI_API_KEY : currentApiKey;
             OPENAI_API_URL = string.IsNullOrEmpty(currentApiUrl) ? OPENAI_API_URL : currentApiUrl;
             BOT_TOKEN = string.IsNullOrEmpty(botToken) ? BOT_TOKEN : botToken;
             ALLOWED_USERS = allowedUsers ?? ALLOWED_USERS;
-            ADMIN_PASSWORD = settings?.AdminPassword ?? ADMIN_PASSWORD;
+            ADMIN_PASSWORD = adminPassword ?? ADMIN_PASSWORD;
         }
 
         public bool CheckAdminPassword(string password)
@@ -117,7 +113,8 @@ namespace myChatGptTelegramBot
                 ApiKey = needUpdateApiKey ? newApiKey : currentApiKey,
                 ApiUrl = needUpdateApiUrl ? newApiUrl : currentApiUrl,
                 BotToken = currentSettings?.BotToken,
-                AllowedUsers = currentSettings.AllowedUsers
+                AllowedUsers = currentSettings?.AllowedUsers,
+                AdminPassword = currentSettings?.AdminPassword
             };
 
             var settingsFile = default(FileStream);
@@ -153,7 +150,7 @@ namespace myChatGptTelegramBot
         public string? ApiKey { get; set; }
         public string? ApiUrl { get; set; }
         public string? BotToken { get; set;}
-        public List<string> AllowedUsers { get; set; }
+        public List<string>? AllowedUsers { get; set; }
         public string? AdminPassword { get; set; }
     }
 }
