@@ -1,10 +1,13 @@
-﻿using Telegram.Bot;
-using Telegram.Bot.Types;
-using Telegram.Bot.Polling;
-using Newtonsoft.Json;
-using Telegram.Bot.Types.ReplyMarkups;
-using Telegram.Bot.Types.Enums;
+﻿using Microsoft.ML;
 using myChatGptTelegramBot;
+using myChatGptTelegramBot.DTO_Models;
+using myChatGptTelegramBot.Services;
+using Newtonsoft.Json;
+using Telegram.Bot;
+using Telegram.Bot.Polling;
+using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace TelegramBot_Chat_GPT
 {
@@ -16,7 +19,12 @@ namespace TelegramBot_Chat_GPT
         private static bool NeedSetNewApiUrl = false;
         private static bool NeedCheckAdminPassword = false;
         private static bool IsAdmin = false;
+        private static bool IsTrained = false;
         private static List<string>? ALLOWED_USERS { get; set; }
+        private static FastTextMessageAnalyzer Analyzer = default;
+        private static AppDbContext DB = default;
+        private static PurchaseService PurchaseSrv = default;
+        private static TaskItemService TaskItemSrv = default;
 
         private static void StartBot()
         {
@@ -41,6 +49,36 @@ namespace TelegramBot_Chat_GPT
             {
                 Console.WriteLine("Не удалось получить список пользователей с правом доступа к боту.");
                 return;
+            }
+
+            #endregion
+
+            #region Инициализация эмбендингов.
+
+            try
+            {
+                Analyzer = new FastTextMessageAnalyzer("cc.ru.300.vec");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Возникла ошибка при инициализации эмбендингов:\n{0}", ex);
+            }
+
+            #endregion
+
+            #region Инициализация БД.
+
+            try
+            {
+                DB = new AppDbContext();
+                DB.Database.EnsureCreatedAsync();
+
+                PurchaseSrv = new PurchaseService(DB);
+                TaskItemSrv = new TaskItemService(DB);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Возникла ошибка при инициализации БД:\n{0}", ex);
             }
 
             #endregion
@@ -105,10 +143,10 @@ namespace TelegramBot_Chat_GPT
 
                 if (messageText == "/help")
                 {
-                    var userPartForHelp =
-                        "Бот создан для использования языковой модели ChatGPT.\n" +
-                        "Для получения имени текущей языковой модели: /get_current_model\n" +
-                        "Для установки новой языковой модели: /set_new_model\n";
+                    var userPartForHelp = string.Empty;
+                    //"Бот создан для использования языковой модели ChatGPT.\n" +
+                    //"Для получения имени текущей языковой модели: /get_current_model\n" +
+                    //"Для установки новой языковой модели: /set_new_model\n";
                     //"Для вызова режима рисования ваш запрос должен начинаться со слова Нарисуй.\n" +
                     //"Для режима Чат доступна настройка креативности ответа ИИ: /creativity_level\n";
                     var adminPartForHelp =
@@ -116,10 +154,76 @@ namespace TelegramBot_Chat_GPT
                         "Для установки нового URL для доступа к API: /set_new_api_url\n" +
                         "Для очистки консоли бота: /clear_console\n" +
                         "Для перезапуска бота: /restart\n" +
-                        "Для понижения уровня доступа: /user";
+                        "Для понижения уровня доступа: /user" +
+                        "Для тренировки моделей анализа: /train";
                     var answer = IsAdmin ? userPartForHelp + adminPartForHelp : userPartForHelp;
 
                     await botClient.SendMessage(messageChat, answer);
+                }
+                else if (messageText == "/get_tasks")
+                {
+                    var tasks = TaskItemSrv.GetAllAsync().Result;
+                    foreach (var task in tasks)
+                    {
+                        var answer = string.Empty;
+
+                        try
+                        {
+                            answer = Newtonsoft.Json.JsonConvert.SerializeObject(task, Formatting.Indented, new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.Default });
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(ex.ToString());
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(answer))
+                            await botClient.SendMessage(messageChat, answer);
+                    }
+                }
+                else if (messageText == "/get_purchases")
+                {
+                    var purchases = PurchaseSrv.GetAllAsync().Result;
+                    foreach (var purchase in purchases)
+                    {
+                        var answer = string.Empty;
+
+                        try
+                        {
+                            answer = Newtonsoft.Json.JsonConvert.SerializeObject(purchase, Formatting.Indented, new JsonSerializerSettings() { StringEscapeHandling = StringEscapeHandling.Default });
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(ex.ToString());
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(answer))
+                            await botClient.SendMessage(messageChat, answer);
+                    }
+                }
+                else if (messageText == "/train")
+                {
+                    if (Analyzer == null)
+                    {
+                        var answer = "";
+                        await botClient.SendMessage(messageChat, answer);
+                        return;
+                    }
+
+                    try
+                    {
+                        // Обучение моделей
+                        Analyzer.TrainMainClassifier("MainTrainData.csv");
+                        Analyzer.TrainPurposePredictor("PurposeTrainData.csv");
+                        Analyzer.TrainReminderPredictor("ReminderTrainData.csv");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Возникла ошибка при инициализации эмбендингов:\n{0}", ex);
+                        return;
+                    }
+
+                    await botClient.SendMessage(messageChat, "Модели для анализа успешно обучены.");
+                    IsTrained = true;
                 }
                 else if (messageText == "/get_current_model")
                 {
@@ -296,10 +400,57 @@ namespace TelegramBot_Chat_GPT
                         return;
                     }
 
-                    var answer = await ChatGPT.ChatWithOpenAI(messageText);
-                    var answerParts = answer?.Split(new string[] { ".\n", ". " }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    foreach (var part in answerParts)
-                        await botClient.SendMessage(messageChat, $"{part}.");
+                    if (Analyzer == null || !IsTrained)
+                    {
+                        await botClient.SendMessage(messageChat, "Модели анализа не обучены или не существуют, попробуйте запустить обучение моделей.");
+                        return;
+                    }
+
+                    var answer = string.Empty;
+
+                    try
+                    {
+                        // Анализ
+                        var analyzeResult = Analyzer.Analyze(messageText);
+                        if (analyzeResult is Model.Purchase)
+                        {
+                            var purchaseResult = (Model.Purchase)analyzeResult;
+                            var newPurchase = new Purchase()
+                            {
+                                Name = purchaseResult.Name,
+                                Cost = purchaseResult.Cost,
+                                Purpose = purchaseResult.Purpose
+                            };
+
+                            await PurchaseSrv.CreateAsync(newPurchase);
+                            answer = $"Создана покупка: {purchaseResult.Name}";
+                        }
+                        else if (analyzeResult is Model.TaskItem)
+                        {
+                            var taskResult = (Model.TaskItem)analyzeResult;
+                            var newTask = new TaskItem()
+                            {
+                                Title = taskResult.Title,
+                                Deadline = taskResult.Deadline,
+                                ReminderFrequency = taskResult.ReminderFrequency
+                            };
+
+                            await TaskItemSrv.CreateAsync(newTask);
+                            answer = $"Создана задача: {taskResult.Title}";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        await botClient.SendMessage(messageChat, "Возникла ошибка в процессе анализа.");
+                        return;
+                    }
+
+                    await botClient.SendMessage(messageChat, answer);
+
+                    //var answer = await ChatGPT.ChatWithOpenAI(messageText);
+                    //var answerParts = answer?.Split(new string[] { ".\n", ". " }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    //foreach (var part in answerParts)
+                    //    await botClient.SendMessage(messageChat, $"{part}.");
                 }
             }
             else if (update.Type == UpdateType.CallbackQuery)
